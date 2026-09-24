@@ -45,7 +45,7 @@ pub struct Entry {
     /// Creator of the GDTF file.
     pub creator: String,
     /// The GDTF's UUID.
-    pub uuid: Option<String>,
+    pub uuid: Option<uuid::Uuid>,
     /// Size of the GDTF archive in bytes.
     pub filesize: u64,
     /// Modes supported by this fixture.
