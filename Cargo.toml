@@ -2,6 +2,11 @@
 name = "gdtf-share"
 version = "0.1.0"
 edition = "2024"
+description = "Library for interacting with the GDTF Share API."
+repository = "https://github.com/BaukeWestendorp/gdtf-share-rs"
+license = "MIT"
+keywords = ["dmx", "gdtf", "mvr"]
+categories = ["api-bindings", "asynchronous"]
 
 [[example]]
 name = "blocking"
