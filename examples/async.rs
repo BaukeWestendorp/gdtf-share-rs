@@ -4,21 +4,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let password = dotenv::var("GDTF_SHARE_PASSWORD")?;
 
     smol::block_on(async {
+        // Create a new GDTF Share client.
         let mut client = gdtf_share::Client::new();
-        client.login(&user, &password)?;
 
-        let mut list = client.get_list()?;
-        list.sort_by(|a, b| a.fixture.cmp(&b.fixture));
+        // Log in to the GDTF Share with a username and password. Make sure these are stored securely!
+        client.login_async(&user, &password).await?;
 
-        for entry in &list {
+        // Get all entries in the GDTF Share.
+        let mut entries = client.get_list_async().await?;
+        entries.sort_by(|a, b| a.fixture.cmp(&b.fixture));
+
+        for entry in &entries {
             eprintln!("{}", entry.file_name());
         }
 
-        let file_bytes = client.download_async(list[0].rid).await.unwrap();
+        // Download GDTF files by their Revision ID.
+        let file_bytes = client.download_async(entries[0].rid).await?;
         let download_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("examples")
             .join("downloaded-from-example.gdtf");
-        std::fs::write(download_path, file_bytes).unwrap();
+        std::fs::write(download_path, file_bytes)?;
+
+        // Use the `Catalog` container containing indexes to performantly search through the entries.
+        let catalog = gdtf_share::Catalog::new(entries);
+        eprintln!("Found {} entries containing \"JDC-1\"", catalog.search("JDC-1").count());
 
         Ok(())
     })
