@@ -8,7 +8,7 @@ name = "blocking"
 required-features = ["client"]
 
 [[example]]
-name = "nonblocking"
+name = "async"
 required-features = ["async", "client"]
 
 [dependencies]
