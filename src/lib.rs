@@ -1,5 +1,7 @@
 //! Library for interacting with the GDTF Share API.
 
+#![warn(missing_docs)]
+
 #[cfg(feature = "client")]
 mod client;
 mod error;
@@ -62,11 +64,14 @@ pub struct GdtfMode {
     pub dmx_footprint: u32,
 }
 
+/// The uploader type for a GDTF entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub enum Uploader {
+    /// The GDTF was uploaded by a user.
     #[serde(rename = "User")]
     User,
+    /// The GDTF was uploaded by a manufacturer.
     #[serde(rename = "Manuf.")]
     Manufacturer,
 }
@@ -80,9 +85,12 @@ impl std::fmt::Display for Uploader {
     }
 }
 
+/// A GDTF file version.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct GdtfVersion {
+    /// Major version number.
     pub major: u8,
+    /// Minor version number.
     pub minor: u8,
 }
 
