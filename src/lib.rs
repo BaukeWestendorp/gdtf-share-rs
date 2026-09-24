@@ -1,4 +1,4 @@
-//! Client library for interacting with the GDTF Share API.
+//! Library for interacting with the GDTF Share API.
 
 #[cfg(feature = "client")]
 mod client;
