@@ -6,8 +6,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut client = gdtf_share::Client::new();
     client.login(&user, &password)?;
 
-    let resp = client.get_list()?;
-    eprintln!("{:?}", resp);
+    let mut list = client.get_list()?;
+    list.sort_by(|a, b| a.fixture.cmp(&b.fixture));
+
+    for entry in list {
+        eprintln!("{}", entry.fixture);
+    }
 
     Ok(())
 }
