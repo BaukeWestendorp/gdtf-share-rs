@@ -52,6 +52,34 @@ pub struct Entry {
     pub modes: Vec<GdtfMode>,
 }
 
+impl Entry {
+    /// Generates a sanitized filename for the GDTF entry.
+    ///
+    /// Has the format: `<manufacturer>@<fixture>@<revision>.gdtf`, with invalid characters replaced by underscores.
+    pub fn file_name(&self) -> String {
+        let sanitize = |s: &str| {
+            let cleaned: String = s
+                .chars()
+                .map(|c| match c {
+                    ' ' | '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0' => '_',
+                    c if c.is_control() => '_',
+                    c => c,
+                })
+                .collect();
+
+            let trimmed = cleaned.trim_end_matches(['.', '_']);
+            if trimmed.is_empty() { "unnamed".to_string() } else { trimmed.to_string() }
+        };
+
+        format!(
+            "{}@{}@{}.gdtf",
+            sanitize(&self.manufacturer),
+            sanitize(&self.fixture),
+            sanitize(&self.revision)
+        )
+    }
+}
+
 /// A DMX mode configuration within a GDTF entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[derive(serde::Serialize, serde::Deserialize)]

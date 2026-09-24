@@ -11,7 +11,7 @@ client.login("Username", "P455w0rd")?;
 let mut list = client.get_list()?;
 
 for entry in &list {
-    eprintln!("{}", entry.fixture);
+    eprintln!("{}", entry.file_name());
 }
 
 let file_bytes = client.download(list[0].rid)?;

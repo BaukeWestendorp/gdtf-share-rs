@@ -11,7 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         list.sort_by(|a, b| a.fixture.cmp(&b.fixture));
 
         for entry in &list {
-            eprintln!("{}", entry.fixture);
+            eprintln!("{}", entry.file_name());
         }
 
         let file_bytes = client.download_async(list[0].rid).await.unwrap();
