@@ -25,9 +25,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .join("downloaded-from-example.gdtf");
         std::fs::write(download_path, file_bytes)?;
 
-        // Use the `Catalog` container containing indexes to performantly search through the entries.
-        let catalog = gdtf_share::Catalog::new(entries);
-        eprintln!("Found {} entries containing \"JDC-1\"", catalog.search("JDC-1").count());
+        // Use the `Library` container containing indexes to search through the entries.
+        let library = gdtf_share::Library::new(entries);
+        eprintln!(
+            "Found {} latest entries with the fixture name \"JDC-1\"",
+            library.query().fixture("JDC-1").latest_only(true).execute().count()
+        );
 
         Ok(())
     })

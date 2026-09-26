@@ -1,21 +1,33 @@
 # gdtf-share - A rust library for interacting with the GDTF Share API
 
-This crate allows for interaction with the [GDTF Share API](https://www.gdtf.eu/gdtf/share_api/share-api/) to fetch fixture entry lists, and download GDTF zip archives.
+This crate allows for interaction with the [GDTF Share API](https://www.gdtf.eu/gdtf/share_api/share-api/) to fetch and search fixture entries, and download GDTF zip archives.
 
 ## Example
 
 ```rs
+// Create a new GDTF Share client.
 let mut client = gdtf_share::Client::new();
+
+// Log in to the GDTF Share with a username and password. Make sure these are stored securely, and not inlined like this!
 client.login("Username", "P455w0rd")?;
 
-let mut list = client.get_list()?;
+// Get all entries in the GDTF Share.
+let entries = client.get_list()?;
 
-for entry in &list {
+for entry in &entries {
     eprintln!("{}", entry.file_name());
 }
 
-let file_bytes = client.download(list[0].rid)?;
-std::fs::write("downloaded.gdtf", file_bytes).unwrap();
+// Download GDTF files by their Revision ID.
+let file_bytes = client.download(entries[0].rid)?;
+std::fs::write(entries[0].file_name(), file_bytes)?;
+
+// Use the `Library` container containing indexes to search through the entries.
+let library = gdtf_share::Library::new(entries);
+eprintln!(
+    "Found {} latest entries with the fixture name \"JDC-1\"",
+    library.query().fixture("JDC-1").latest_only(true).execute().count()
+);
 ```
 
 ## Cargo Features

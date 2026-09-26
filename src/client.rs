@@ -135,7 +135,7 @@ impl Client {
     /// * [`Error::NotFound`] - Revision ID (`rid`) does not exist.
     /// * [`Error::Unauthorized`] - Session cookie has expired or is invalid.
     /// * [`Error::ClientError`] - Transport or network failure.
-    pub fn download(&self, rid: u32) -> Result<Vec<u8>> {
+    pub fn download(&self, rid: RevisionId) -> Result<Vec<u8>> {
         let req = self.download_req(rid)?;
         let res = ehttp::fetch_blocking(&req).map_err(Error::ClientError)?;
         let list = self.handle_download_res(res)?;
@@ -151,14 +151,14 @@ impl Client {
     /// * [`Error::Unauthorized`] - Session cookie has expired or is invalid.
     /// * [`Error::ClientError`] - Transport or network failure.
     #[cfg(feature = "async")]
-    pub async fn download_async(&self, rid: u32) -> Result<Vec<u8>> {
+    pub async fn download_async(&self, rid: RevisionId) -> Result<Vec<u8>> {
         let req = self.download_req(rid)?;
         let res = ehttp::fetch_async(req).await.map_err(Error::ClientError)?;
         let list = self.handle_download_res(res)?;
         Ok(list)
     }
 
-    fn download_req(&self, rid: u32) -> Result<ehttp::Request> {
+    fn download_req(&self, rid: RevisionId) -> Result<ehttp::Request> {
         const URL_DOWNLOAD: &str = "https://gdtf-share.com/apis/public/downloadFile.php";
         let Some(session) = &self.session else { return Err(Error::NoSession) };
         let req = ehttp::Request::get(format!("{URL_DOWNLOAD}?rid={rid}"))
