@@ -3,15 +3,58 @@
 use super::*;
 
 /// API client for managing a GDTF Share session.
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct Client {
     session: Option<Session>,
+
+    #[cfg(feature = "cache")]
+    cache_path: Option<std::path::PathBuf>,
+    #[cfg(feature = "cache")]
+    cache_ttl: Option<std::time::Duration>,
+}
+
+impl Default for Client {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Client {
     /// Creates a new unauthenticated GDTF Share API client.
     pub fn new() -> Self {
-        Self { session: None }
+        Self {
+            session: None,
+            #[cfg(feature = "cache")]
+            cache_path: default_cache_path(),
+            #[cfg(feature = "cache")]
+            cache_ttl: Some(std::time::Duration::from_secs(24 * 60 * 60)),
+        }
+    }
+
+    /// Sets a custom cache file path and TTL, overriding the system default cache location.
+    #[cfg(feature = "cache")]
+    pub fn with_cache(
+        mut self,
+        path: impl Into<std::path::PathBuf>,
+        ttl: std::time::Duration,
+    ) -> Self {
+        self.cache_path = Some(path.into());
+        self.cache_ttl = Some(ttl);
+        self
+    }
+
+    /// Customizes the TTL duration while keeping the system default cache path.
+    #[cfg(feature = "cache")]
+    pub fn with_cache_ttl(mut self, ttl: std::time::Duration) -> Self {
+        self.cache_ttl = Some(ttl);
+        self
+    }
+
+    /// Disables filesystem caching for this client instance.
+    #[cfg(feature = "cache")]
+    pub fn without_cache(mut self) -> Self {
+        self.cache_path = None;
+        self
     }
 
     /// Authenticates with the GDTF Share API synchronously.
@@ -79,9 +122,24 @@ impl Client {
     /// * [`Error::Json`] - Failed to deserialize response JSON.
     /// * [`Error::ClientError`] - Transport or network failure.
     pub fn get_list(&self) -> Result<Vec<Entry>> {
+        if self.session.is_none() {
+            return Err(Error::NoSession);
+        }
+
+        #[cfg(feature = "cache")]
+        if let Some(entries) = self.read_cache() {
+            return Ok(entries);
+        }
+
         let req = self.get_list_req()?;
         let res = ehttp::fetch_blocking(&req).map_err(Error::ClientError)?;
-        let list = self.handle_get_list_res(res)?;
+
+        #[cfg(feature = "cache")]
+        if res.status == 200 {
+            self.write_cache(&res.bytes);
+        }
+
+        let list = self.handle_get_list_res(&res)?;
         Ok(list)
     }
 
@@ -95,9 +153,24 @@ impl Client {
     /// * [`Error::ClientError`] - Transport or network failure.
     #[cfg(feature = "async")]
     pub async fn get_list_async(&self) -> Result<Vec<Entry>> {
+        #[cfg(feature = "cache")]
+        if let Some(entries) = self.read_cache() {
+            return Ok(entries);
+        }
+
+        if self.session.is_none() {
+            return Err(Error::NoSession);
+        }
+
         let req = self.get_list_req()?;
         let res = ehttp::fetch_async(req).await.map_err(Error::ClientError)?;
-        let list = self.handle_get_list_res(res)?;
+
+        #[cfg(feature = "cache")]
+        if res.status == 200 {
+            self.write_cache(&res.bytes);
+        }
+
+        let list = self.handle_get_list_res(&res)?;
         Ok(list)
     }
 
@@ -109,7 +182,16 @@ impl Client {
         Ok(req)
     }
 
-    fn handle_get_list_res(&self, res: ehttp::Response) -> Result<Vec<Entry>> {
+    fn handle_get_list_res(&self, res: &ehttp::Response) -> Result<Vec<Entry>> {
+        match res.status {
+            200 => self.handle_get_list_bytes(&res.bytes),
+            400 => Err(Error::BadRequest),
+            401 => Err(Error::Unauthorized),
+            code => Err(Error::UnexpectedStatusCode(code)),
+        }
+    }
+
+    fn handle_get_list_bytes(&self, bytes: &[u8]) -> Result<Vec<Entry>> {
         #[derive(serde::Deserialize)]
         struct GetListResponse {
             // NOTE: I'm ignoring `result` as it should always be true.
@@ -117,13 +199,32 @@ impl Client {
             pub list: Vec<Entry>,
         }
 
-        match res.status {
-            200 => serde_json::from_slice::<GetListResponse>(&res.bytes)
-                .map_err(Error::Json)
-                .map(|r| r.list),
-            400 => Err(Error::BadRequest),
-            401 => Err(Error::Unauthorized),
-            code => Err(Error::UnexpectedStatusCode(code)),
+        serde_json::from_slice::<GetListResponse>(bytes).map_err(Error::Json).map(|r| r.list)
+    }
+
+    #[cfg(feature = "cache")]
+    fn read_cache(&self) -> Option<Vec<Entry>> {
+        let path = self.cache_path.as_ref()?;
+        let ttl = self.cache_ttl?;
+
+        let metadata = std::fs::metadata(path).ok()?;
+        let modified = metadata.modified().ok()?;
+
+        if modified.elapsed().unwrap_or_default() > ttl {
+            return None;
+        }
+
+        let bytes = std::fs::read(path).ok()?;
+        self.handle_get_list_bytes(&bytes).ok()
+    }
+
+    #[cfg(feature = "cache")]
+    fn write_cache(&self, bytes: &[u8]) {
+        if let Some(path) = &self.cache_path {
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(path, bytes);
         }
     }
 
@@ -175,4 +276,9 @@ impl Client {
             code => Err(Error::UnexpectedStatusCode(code)),
         }
     }
+}
+
+#[cfg(feature = "cache")]
+fn default_cache_path() -> Option<std::path::PathBuf> {
+    dirs::cache_dir().map(|p| p.join("gdtf-share").join("get_list.json"))
 }
