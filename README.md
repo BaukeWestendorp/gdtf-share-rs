@@ -5,11 +5,12 @@ This crate allows for interaction with the [GDTF Share API](https://www.gdtf.eu/
 ## Example
 
 ```rust
-// Create a new GDTF Share client.
-let mut client = gdtf_share::Client::new();
+// Create a new GDTF Share client with your credentials.
+// Make sure these are stored securely, and not hardcoded like this!
+let mut client = gdtf_share::Client::new("Username", "P455w0rd");
 
-// Log in to the GDTF Share with a username and password. Make sure these are stored securely, and not inlined like this!
-client.login("Username", "P455w0rd")?;
+// Optionally pre-authenticate synchronously to prevent lazy login on subsequent calls.
+client.login()?;
 
 // Get all entries in the GDTF Share (uses filesystem caching if `cache` feature is enabled).
 let entries = client.get_list()?;
@@ -18,7 +19,7 @@ for entry in &entries {
     eprintln!("{}", entry.file_name());
 }
 
-// Download GDTF files by their Revision ID.
+// Download GDTF files by their Revision ID (cached locally if `cache` feature is enabled).
 let file_bytes = client.download(entries[0].rid)?;
 std::fs::write(entries[0].file_name(), file_bytes)?;
 
@@ -32,7 +33,8 @@ eprintln!(
 
 ## Caching
 
-When the cache feature is enabled, Client::new() automatically caches the get_list API response locally in the system's default cache directory (dirs::cache_dir()). Calls to get_list() or get_list_async() will read directly from the disk cache if the cached response is valid.
+When the `cache` feature is enabled, `Client` automatically caches API responses and downloaded files locally
+Calls to `get_list()` and `download()` will read directly from disk if a valid cached item exists.
 Cache behavior can be customized or disabled using builder methods on Client:
 
 ```rust
@@ -44,9 +46,9 @@ let client = gdtf_share::Client::new()
 
 // Specify a custom cache path and TTL
 let client = gdtf_share::Client::new()
-    .with_cache("/path/to/cache.json", Duration::from_secs(3600));
+    .with_cache("/path/to/cache/", Duration::from_secs(3600));
 
-// Disable caching explicitly
+// Disable caching
 let client = gdtf_share::Client::new()
     .without_cache();
 ```
@@ -55,7 +57,8 @@ let client = gdtf_share::Client::new()
 
 - `client`: Provides the HTTP API client for managing a GDTF Share session.
 - `async`: Enables asynchronous API methods for logging in, fetching the fixture list, and downloading files.
-- `cache`: Enables automatic local filesystem caching of the fixture entry list using the dirs crate.
+- `cache`: Enables automatic local filesystem caching of the fixture entry list and downloaded GDTF files.
+- `log`: Logs debug info for the `log` crate.
 
 ## Contributing
 
