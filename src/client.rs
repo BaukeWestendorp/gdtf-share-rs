@@ -70,6 +70,9 @@ impl Client {
     ///
     /// This function is usefull for when you want to prevent lazy-login on other API calls.
     pub fn login(&mut self) -> Result<()> {
+        #[cfg(feature = "log")]
+        log::debug!("Attempting synchronous login");
+
         let req = self.login_req(self.username.expose_secret(), self.password.expose_secret())?;
         let res = ehttp::fetch_blocking(&req).map_err(Error::ClientError)?;
         self.handle_login_res(res)?;
@@ -81,6 +84,9 @@ impl Client {
     /// This function is usefull for when you want to prevent lazy-login on other API calls.
     #[cfg(feature = "async")]
     pub async fn login_async(&mut self) -> Result<()> {
+        #[cfg(feature = "log")]
+        log::debug!("Attempting asynchronous login");
+
         let req = self.login_req(self.username.expose_secret(), self.password.expose_secret())?;
         let res = ehttp::fetch_async(req).await.map_err(Error::ClientError)?;
         self.handle_login_res(res)?;
@@ -102,6 +108,9 @@ impl Client {
     fn handle_login_res(&mut self, res: ehttp::Response) -> Result<()> {
         match res.status {
             200 => {
+                #[cfg(feature = "log")]
+                log::debug!("Login successful");
+
                 let cookie = res.headers.get("set-cookie").ok_or(Error::MissingCookie)?.to_string();
                 self.session = Some(Session { cookie: secrecy::SecretString::from(cookie) });
                 Ok(())
@@ -117,6 +126,9 @@ impl Client {
     /// If the `cache` feature is enabled, this will attempt to read from the cache first,
     /// and write to the cache if the request is successful.
     pub fn get_list(&mut self) -> Result<Vec<Entry>> {
+        #[cfg(feature = "log")]
+        log::debug!("Fetching fixture entry list synchronously");
+
         #[cfg(feature = "cache")]
         if let Some(entries) = self.read_cache() {
             return Ok(entries);
@@ -141,6 +153,9 @@ impl Client {
     /// and write to the cache if the request is successful.
     #[cfg(feature = "async")]
     pub async fn get_list_async(&mut self) -> Result<Vec<Entry>> {
+        #[cfg(feature = "log")]
+        log::debug!("Fetching fixture entry list asynchronously");
+
         #[cfg(feature = "cache")]
         if let Some(entries) = self.read_cache() {
             return Ok(entries);
@@ -183,11 +198,17 @@ impl Client {
             pub list: Vec<Entry>,
         }
 
-        serde_json::from_slice::<GetListResponse>(bytes).map_err(Error::Json).map(|r| r.list)
+        let parsed = serde_json::from_slice::<GetListResponse>(bytes).map_err(Error::Json)?;
+        #[cfg(feature = "log")]
+        log::debug!("Successfully parsed {} fixture entries", parsed.list.len());
+
+        Ok(parsed.list)
     }
 
     fn session(&mut self) -> Result<&Session> {
         if self.session.is_none() {
+            #[cfg(feature = "log")]
+            log::debug!("No active session found; initiating login");
             self.login()?;
         }
 
@@ -196,6 +217,9 @@ impl Client {
 
     /// Tries to log in if it's not, then downloads a GDTF zip archive by Revision ID (RID) synchronously.
     pub fn download(&mut self, rid: RevisionId) -> Result<Vec<u8>> {
+        #[cfg(feature = "log")]
+        log::debug!("Downloading GDTF archive for RID {rid} synchronously");
+
         let cookie = self.session()?.cookie.clone();
         let req = self.download_req(rid, &cookie)?;
         let res = ehttp::fetch_blocking(&req).map_err(Error::ClientError)?;
@@ -206,6 +230,9 @@ impl Client {
     /// Tries to log in if it's not, then downloads a GDTF zip archive by Revision ID (RID) asynchronously.
     #[cfg(feature = "async")]
     pub async fn download_async(&mut self, rid: RevisionId) -> Result<Vec<u8>> {
+        #[cfg(feature = "log")]
+        log::debug!("Downloading GDTF archive for RID {rid} asynchronously");
+
         let cookie = self.session_async().await?.cookie.clone();
         let req = self.download_req(rid, &cookie)?;
         let res = ehttp::fetch_async(req).await.map_err(Error::ClientError)?;
@@ -226,7 +253,11 @@ impl Client {
 
     fn handle_download_res(&self, res: ehttp::Response) -> Result<Vec<u8>> {
         match res.status {
-            200 => Ok(res.bytes),
+            200 => {
+                #[cfg(feature = "log")]
+                log::debug!("Download successful ({} bytes)", res.bytes.len());
+                Ok(res.bytes)
+            }
             400 => Err(Error::BadRequest),
             401 => Err(Error::Unauthorized),
             404 => Err(Error::NotFound),
@@ -237,6 +268,8 @@ impl Client {
     #[cfg(feature = "async")]
     async fn session_async(&mut self) -> Result<&Session> {
         if self.session.is_none() {
+            #[cfg(feature = "log")]
+            log::debug!("No active session found; initiating async login");
             self.login_async().await?;
         }
 
@@ -252,11 +285,18 @@ impl Client {
         let modified = metadata.modified().ok()?;
 
         if modified.elapsed().unwrap_or_default() > ttl {
+            #[cfg(feature = "log")]
+            log::debug!("Cache expired at path: {:?}", path);
             return None;
         }
 
         let bytes = std::fs::read(path).ok()?;
-        self.handle_get_list_bytes(&bytes).ok()
+        let entries = self.handle_get_list_bytes(&bytes).ok()?;
+
+        #[cfg(feature = "log")]
+        log::debug!("Cache hit: loaded {} entries from {:?}", entries.len(), path);
+
+        Some(entries)
     }
 
     #[cfg(feature = "cache")]
@@ -265,7 +305,10 @@ impl Client {
             if let Some(parent) = path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-            let _ = std::fs::write(path, bytes);
+            if std::fs::write(path, bytes).is_ok() {
+                #[cfg(feature = "log")]
+                log::debug!("Wrote {} bytes to cache at {:?}", bytes.len(), path);
+            }
         }
     }
 }

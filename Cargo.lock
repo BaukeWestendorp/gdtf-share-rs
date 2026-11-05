@@ -525,6 +525,7 @@ dependencies = [
  "dirs",
  "dotenv",
  "ehttp",
+ "log",
  "secrecy",
  "serde",
  "serde_json",
