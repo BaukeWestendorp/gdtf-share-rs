@@ -4,6 +4,12 @@ use secrecy::ExposeSecret;
 
 use super::*;
 
+#[cfg(feature = "cache")]
+const LIST_CACHE_FILE: &str = "get_list.json";
+
+#[cfg(feature = "cache")]
+const DOWNLOADS_CACHE_DIR: &str = "downloads";
+
 /// Represents an active authenticated session.
 #[derive(Clone)]
 pub struct Session {
@@ -40,7 +46,9 @@ impl Client {
         }
     }
 
-    /// Sets a custom cache file path and TTL, overriding the system default cache location.
+    /// Sets a custom cache directory path and TTL, overriding the system default cache location.
+    ///
+    /// The fixture list cache and downloaded GDTF archives will be stored inside this directory.
     #[cfg(feature = "cache")]
     pub fn with_cache(
         mut self,
@@ -68,7 +76,7 @@ impl Client {
 
     /// Authenticates with the GDTF Share API synchronously.
     ///
-    /// This function is usefull for when you want to prevent lazy-login on other API calls.
+    /// This function is useful for when you want to prevent lazy-login on other API calls.
     pub fn login(&mut self) -> Result<()> {
         #[cfg(feature = "log")]
         log::debug!("Attempting synchronous login");
@@ -81,7 +89,7 @@ impl Client {
 
     /// Authenticates with the GDTF Share API asynchronously.
     ///
-    /// This function is usefull for when you want to prevent lazy-login on other API calls.
+    /// This function is useful for when you want to prevent lazy-login on other API calls.
     #[cfg(feature = "async")]
     pub async fn login_async(&mut self) -> Result<()> {
         #[cfg(feature = "log")]
@@ -121,7 +129,7 @@ impl Client {
         }
     }
 
-    /// Tries to log in if it's not, then fetches the fixture entry list synchronously
+    /// Tries to log in if not already authenticated, then fetches the fixture entry list synchronously.
     ///
     /// If the `cache` feature is enabled, this will attempt to read from the cache first,
     /// and write to the cache if the request is successful.
@@ -147,7 +155,7 @@ impl Client {
         Ok(list)
     }
 
-    /// Tries to log in if it's not, then fetches the fixture entry list asynchronously.
+    /// Tries to log in if not already authenticated, then fetches the fixture entry list asynchronously.
     ///
     /// If the `cache` feature is enabled, this will attempt to read from the cache first,
     /// and write to the cache if the request is successful.
@@ -215,29 +223,53 @@ impl Client {
         self.session.as_ref().ok_or(Error::Unauthorized)
     }
 
-    /// Tries to log in if it's not, then downloads a GDTF zip archive by Revision ID (RID) synchronously.
+    /// Tries to log in if not already authenticated, then downloads a GDTF zip archive by Revision ID (RID) synchronously.
+    ///
+    /// If the `cache` feature is enabled, this will attempt to read from the download cache first,
+    /// and write to the download cache if the request is successful.
     pub fn download(&mut self, rid: RevisionId) -> Result<Vec<u8>> {
         #[cfg(feature = "log")]
         log::debug!("Downloading GDTF archive for RID {rid} synchronously");
 
+        #[cfg(feature = "cache")]
+        if let Some(bytes) = self.read_download_cache(rid) {
+            return Ok(bytes);
+        }
+
         let cookie = self.session()?.cookie.clone();
         let req = self.download_req(rid, &cookie)?;
         let res = ehttp::fetch_blocking(&req).map_err(Error::ClientError)?;
-        let list = self.handle_download_res(res)?;
-        Ok(list)
+        let bytes = self.handle_download_res(res)?;
+
+        #[cfg(feature = "cache")]
+        self.write_download_cache(rid, &bytes);
+
+        Ok(bytes)
     }
 
-    /// Tries to log in if it's not, then downloads a GDTF zip archive by Revision ID (RID) asynchronously.
+    /// Tries to log in if not already authenticated, then downloads a GDTF zip archive by Revision ID (RID) asynchronously.
+    ///
+    /// If the `cache` feature is enabled, this will attempt to read from the download cache first,
+    /// and write to the download cache if the request is successful.
     #[cfg(feature = "async")]
     pub async fn download_async(&mut self, rid: RevisionId) -> Result<Vec<u8>> {
         #[cfg(feature = "log")]
         log::debug!("Downloading GDTF archive for RID {rid} asynchronously");
 
+        #[cfg(feature = "cache")]
+        if let Some(bytes) = self.read_download_cache(rid) {
+            return Ok(bytes);
+        }
+
         let cookie = self.session_async().await?.cookie.clone();
         let req = self.download_req(rid, &cookie)?;
         let res = ehttp::fetch_async(req).await.map_err(Error::ClientError)?;
-        let list = self.handle_download_res(res)?;
-        Ok(list)
+        let bytes = self.handle_download_res(res)?;
+
+        #[cfg(feature = "cache")]
+        self.write_download_cache(rid, &bytes);
+
+        Ok(bytes)
     }
 
     fn download_req(
@@ -277,11 +309,16 @@ impl Client {
     }
 
     #[cfg(feature = "cache")]
+    fn list_cache_path(&self) -> Option<std::path::PathBuf> {
+        Some(self.cache_path.as_ref()?.join(LIST_CACHE_FILE))
+    }
+
+    #[cfg(feature = "cache")]
     fn read_cache(&self) -> Option<Vec<Entry>> {
-        let path = self.cache_path.as_ref()?;
+        let path = self.list_cache_path()?;
         let ttl = self.cache_ttl?;
 
-        let metadata = std::fs::metadata(path).ok()?;
+        let metadata = std::fs::metadata(&path).ok()?;
         let modified = metadata.modified().ok()?;
 
         if modified.elapsed().unwrap_or_default() > ttl {
@@ -290,7 +327,7 @@ impl Client {
             return None;
         }
 
-        let bytes = std::fs::read(path).ok()?;
+        let bytes = std::fs::read(&path).ok()?;
         let entries = self.handle_get_list_bytes(&bytes).ok()?;
 
         #[cfg(feature = "log")]
@@ -301,13 +338,53 @@ impl Client {
 
     #[cfg(feature = "cache")]
     fn write_cache(&self, bytes: &[u8]) {
-        if let Some(path) = &self.cache_path {
+        if let Some(path) = self.list_cache_path() {
             if let Some(parent) = path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-            if std::fs::write(path, bytes).is_ok() {
+            if std::fs::write(&path, bytes).is_ok() {
                 #[cfg(feature = "log")]
                 log::debug!("Wrote {} bytes to cache at {:?}", bytes.len(), path);
+            }
+        }
+    }
+
+    #[cfg(feature = "cache")]
+    fn download_cache_path(&self, rid: RevisionId) -> Option<std::path::PathBuf> {
+        let base_path = self.cache_path.as_ref()?;
+        Some(base_path.join(DOWNLOADS_CACHE_DIR).join(format!("{rid}.gdtf")))
+    }
+
+    #[cfg(feature = "cache")]
+    fn read_download_cache(&self, rid: RevisionId) -> Option<Vec<u8>> {
+        let path = self.download_cache_path(rid)?;
+        let ttl = self.cache_ttl?;
+
+        let metadata = std::fs::metadata(&path).ok()?;
+        let modified = metadata.modified().ok()?;
+
+        if modified.elapsed().unwrap_or_default() > ttl {
+            #[cfg(feature = "log")]
+            log::debug!("Download cache expired at path: {:?}", path);
+            return None;
+        }
+
+        let bytes = std::fs::read(&path).ok()?;
+        #[cfg(feature = "log")]
+        log::debug!("Cache hit: loaded {} bytes for RID {} from {:?}", bytes.len(), rid, path);
+
+        Some(bytes)
+    }
+
+    #[cfg(feature = "cache")]
+    fn write_download_cache(&self, rid: RevisionId, bytes: &[u8]) {
+        if let Some(path) = self.download_cache_path(rid) {
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if std::fs::write(&path, bytes).is_ok() {
+                #[cfg(feature = "log")]
+                log::debug!("Wrote {} bytes to download cache at {:?}", bytes.len(), path);
             }
         }
     }
@@ -315,5 +392,5 @@ impl Client {
 
 #[cfg(feature = "cache")]
 fn default_cache_path() -> Option<std::path::PathBuf> {
-    dirs::cache_dir().map(|p| p.join("gdtf-share").join("get_list.json"))
+    dirs::cache_dir().map(|p| p.join("gdtf-share"))
 }
