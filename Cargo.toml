@@ -27,10 +27,11 @@ name = "query"
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+uuid = { version = "1.26.1", features = ["serde"] }
 
 # feature = "client"
 ehttp = { version = "0.7.1", optional = true }
-uuid = { version = "1.26.1", features = ["serde"] }
+secrecy = { version = "0.10.3", optional = true }
 
 # feature = "cache"
 dirs = { version = "7.0", optional = true }
@@ -44,4 +45,4 @@ smol = "2.0.2"
 default = []
 async = ["client", "ehttp/native-async"]
 cache = ["dep:dirs"]
-client = ["dep:ehttp"]
+client = ["dep:ehttp", "dep:secrecy"]

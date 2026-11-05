@@ -1,9 +1,18 @@
 //! HTTP client for interacting with the GDTF Share API.
 
+use secrecy::ExposeSecret;
+
 use super::*;
 
+/// Represents an active authenticated session.
+#[derive(Clone)]
+pub struct Session {
+    /// The session cookie string returned by the server.
+    cookie: secrecy::SecretString,
+}
+
 /// API client for managing a GDTF Share session.
-#[derive(Debug)]
+#[derive(Clone)]
 pub struct Client {
     session: Option<Session>,
 
@@ -11,23 +20,23 @@ pub struct Client {
     cache_path: Option<std::path::PathBuf>,
     #[cfg(feature = "cache")]
     cache_ttl: Option<std::time::Duration>,
-}
 
-impl Default for Client {
-    fn default() -> Self {
-        Self::new()
-    }
+    username: secrecy::SecretString,
+    password: secrecy::SecretString,
 }
 
 impl Client {
     /// Creates a new unauthenticated GDTF Share API client.
-    pub fn new() -> Self {
+    pub fn new(username: &str, password: &str) -> Self {
         Self {
             session: None,
             #[cfg(feature = "cache")]
             cache_path: default_cache_path(),
             #[cfg(feature = "cache")]
             cache_ttl: Some(std::time::Duration::from_secs(24 * 60 * 60)),
+
+            username: secrecy::SecretString::from(username),
+            password: secrecy::SecretString::from(password),
         }
     }
 
@@ -59,14 +68,9 @@ impl Client {
 
     /// Authenticates with the GDTF Share API synchronously.
     ///
-    /// # Errors
-    ///
-    /// * [`Error::Unauthorized`] - Invalid username or password.
-    /// * [`Error::BadRequest`] - The request payload was malformed.
-    /// * [`Error::MissingCookie`] - The response missing the `Set-Cookie` header.
-    /// * [`Error::ClientError`] - Transport or network failure.
-    pub fn login(&mut self, user: &str, password: &str) -> Result<()> {
-        let req = self.login_req(user, password)?;
+    /// This function is usefull for when you want to prevent lazy-login on other API calls.
+    pub fn login(&mut self) -> Result<()> {
+        let req = self.login_req(self.username.expose_secret(), self.password.expose_secret())?;
         let res = ehttp::fetch_blocking(&req).map_err(Error::ClientError)?;
         self.handle_login_res(res)?;
         Ok(())
@@ -74,15 +78,10 @@ impl Client {
 
     /// Authenticates with the GDTF Share API asynchronously.
     ///
-    /// # Errors
-    ///
-    /// * [`Error::Unauthorized`] - Invalid username or password.
-    /// * [`Error::BadRequest`] - The request payload was malformed.
-    /// * [`Error::MissingCookie`] - The response missing the `Set-Cookie` header.
-    /// * [`Error::ClientError`] - Transport or network failure.
+    /// This function is usefull for when you want to prevent lazy-login on other API calls.
     #[cfg(feature = "async")]
-    pub async fn login_async(&mut self, user: &str, password: &str) -> Result<()> {
-        let req = self.login_req(user, password)?;
+    pub async fn login_async(&mut self) -> Result<()> {
+        let req = self.login_req(self.username.expose_secret(), self.password.expose_secret())?;
         let res = ehttp::fetch_async(req).await.map_err(Error::ClientError)?;
         self.handle_login_res(res)?;
         Ok(())
@@ -104,7 +103,7 @@ impl Client {
         match res.status {
             200 => {
                 let cookie = res.headers.get("set-cookie").ok_or(Error::MissingCookie)?.to_string();
-                self.session = Some(Session { cookie });
+                self.session = Some(Session { cookie: secrecy::SecretString::from(cookie) });
                 Ok(())
             }
             400 => Err(Error::BadRequest),
@@ -113,25 +112,18 @@ impl Client {
         }
     }
 
-    /// Fetches the fixture entry list synchronously.
+    /// Tries to log in if it's not, then fetches the fixture entry list synchronously
     ///
-    /// # Errors
-    ///
-    /// * [`Error::NoSession`] - Client is unauthenticated.
-    /// * [`Error::Unauthorized`] - Session cookie has expired or is invalid.
-    /// * [`Error::Json`] - Failed to deserialize response JSON.
-    /// * [`Error::ClientError`] - Transport or network failure.
-    pub fn get_list(&self) -> Result<Vec<Entry>> {
-        if self.session.is_none() {
-            return Err(Error::NoSession);
-        }
-
+    /// If the `cache` feature is enabled, this will attempt to read from the cache first,
+    /// and write to the cache if the request is successful.
+    pub fn get_list(&mut self) -> Result<Vec<Entry>> {
         #[cfg(feature = "cache")]
         if let Some(entries) = self.read_cache() {
             return Ok(entries);
         }
 
-        let req = self.get_list_req()?;
+        let cookie = self.session()?.cookie.clone();
+        let req = self.get_list_req(&cookie)?;
         let res = ehttp::fetch_blocking(&req).map_err(Error::ClientError)?;
 
         #[cfg(feature = "cache")]
@@ -143,26 +135,19 @@ impl Client {
         Ok(list)
     }
 
-    /// Fetches the fixture entry list asynchronously.
+    /// Tries to log in if it's not, then fetches the fixture entry list asynchronously.
     ///
-    /// # Errors
-    ///
-    /// * [`Error::NoSession`] - Client is unauthenticated.
-    /// * [`Error::Unauthorized`] - Session cookie has expired or is invalid.
-    /// * [`Error::Json`] - Failed to deserialize response JSON.
-    /// * [`Error::ClientError`] - Transport or network failure.
+    /// If the `cache` feature is enabled, this will attempt to read from the cache first,
+    /// and write to the cache if the request is successful.
     #[cfg(feature = "async")]
-    pub async fn get_list_async(&self) -> Result<Vec<Entry>> {
+    pub async fn get_list_async(&mut self) -> Result<Vec<Entry>> {
         #[cfg(feature = "cache")]
         if let Some(entries) = self.read_cache() {
             return Ok(entries);
         }
 
-        if self.session.is_none() {
-            return Err(Error::NoSession);
-        }
-
-        let req = self.get_list_req()?;
+        let cookie = self.session_async().await?.cookie.clone();
+        let req = self.get_list_req(&cookie)?;
         let res = ehttp::fetch_async(req).await.map_err(Error::ClientError)?;
 
         #[cfg(feature = "cache")]
@@ -174,11 +159,10 @@ impl Client {
         Ok(list)
     }
 
-    fn get_list_req(&self) -> Result<ehttp::Request> {
+    fn get_list_req(&self, cookie: &secrecy::SecretString) -> Result<ehttp::Request> {
         const URL_GET_LIST: &str = "https://gdtf-share.com/apis/public/getList.php";
-        let Some(session) = &self.session else { return Err(Error::NoSession) };
         let req = ehttp::Request::get(URL_GET_LIST)
-            .with_headers(ehttp::Headers::new(&[("Cookie", &session.cookie)]));
+            .with_headers(ehttp::Headers::new(&[("Cookie", cookie.expose_secret())]));
         Ok(req)
     }
 
@@ -200,6 +184,63 @@ impl Client {
         }
 
         serde_json::from_slice::<GetListResponse>(bytes).map_err(Error::Json).map(|r| r.list)
+    }
+
+    fn session(&mut self) -> Result<&Session> {
+        if self.session.is_none() {
+            self.login()?;
+        }
+
+        self.session.as_ref().ok_or(Error::Unauthorized)
+    }
+
+    /// Tries to log in if it's not, then downloads a GDTF zip archive by Revision ID (RID) synchronously.
+    pub fn download(&mut self, rid: RevisionId) -> Result<Vec<u8>> {
+        let cookie = self.session()?.cookie.clone();
+        let req = self.download_req(rid, &cookie)?;
+        let res = ehttp::fetch_blocking(&req).map_err(Error::ClientError)?;
+        let list = self.handle_download_res(res)?;
+        Ok(list)
+    }
+
+    /// Tries to log in if it's not, then downloads a GDTF zip archive by Revision ID (RID) asynchronously.
+    #[cfg(feature = "async")]
+    pub async fn download_async(&mut self, rid: RevisionId) -> Result<Vec<u8>> {
+        let cookie = self.session_async().await?.cookie.clone();
+        let req = self.download_req(rid, &cookie)?;
+        let res = ehttp::fetch_async(req).await.map_err(Error::ClientError)?;
+        let list = self.handle_download_res(res)?;
+        Ok(list)
+    }
+
+    fn download_req(
+        &self,
+        rid: RevisionId,
+        cookie: &secrecy::SecretString,
+    ) -> Result<ehttp::Request> {
+        const URL_DOWNLOAD: &str = "https://gdtf-share.com/apis/public/downloadFile.php";
+        let req = ehttp::Request::get(format!("{URL_DOWNLOAD}?rid={rid}"))
+            .with_headers(ehttp::Headers::new(&[("Cookie", cookie.expose_secret())]));
+        Ok(req)
+    }
+
+    fn handle_download_res(&self, res: ehttp::Response) -> Result<Vec<u8>> {
+        match res.status {
+            200 => Ok(res.bytes),
+            400 => Err(Error::BadRequest),
+            401 => Err(Error::Unauthorized),
+            404 => Err(Error::NotFound),
+            code => Err(Error::UnexpectedStatusCode(code)),
+        }
+    }
+
+    #[cfg(feature = "async")]
+    async fn session_async(&mut self) -> Result<&Session> {
+        if self.session.is_none() {
+            self.login_async().await?;
+        }
+
+        self.session.as_ref().ok_or(Error::Unauthorized)
     }
 
     #[cfg(feature = "cache")]
@@ -225,55 +266,6 @@ impl Client {
                 let _ = std::fs::create_dir_all(parent);
             }
             let _ = std::fs::write(path, bytes);
-        }
-    }
-
-    /// Downloads a GDTF zip archive by Revision ID (RID) synchronously.
-    ///
-    /// # Errors
-    ///
-    /// * [`Error::NoSession`] - Client is unauthenticated.
-    /// * [`Error::NotFound`] - Revision ID (`rid`) does not exist.
-    /// * [`Error::Unauthorized`] - Session cookie has expired or is invalid.
-    /// * [`Error::ClientError`] - Transport or network failure.
-    pub fn download(&self, rid: RevisionId) -> Result<Vec<u8>> {
-        let req = self.download_req(rid)?;
-        let res = ehttp::fetch_blocking(&req).map_err(Error::ClientError)?;
-        let list = self.handle_download_res(res)?;
-        Ok(list)
-    }
-
-    /// Downloads a GDTF zip archive by Revision ID (RID) asynchronously.
-    ///
-    /// # Errors
-    ///
-    /// * [`Error::NoSession`] - Client is unauthenticated.
-    /// * [`Error::NotFound`] - Revision ID (`rid`) does not exist.
-    /// * [`Error::Unauthorized`] - Session cookie has expired or is invalid.
-    /// * [`Error::ClientError`] - Transport or network failure.
-    #[cfg(feature = "async")]
-    pub async fn download_async(&self, rid: RevisionId) -> Result<Vec<u8>> {
-        let req = self.download_req(rid)?;
-        let res = ehttp::fetch_async(req).await.map_err(Error::ClientError)?;
-        let list = self.handle_download_res(res)?;
-        Ok(list)
-    }
-
-    fn download_req(&self, rid: RevisionId) -> Result<ehttp::Request> {
-        const URL_DOWNLOAD: &str = "https://gdtf-share.com/apis/public/downloadFile.php";
-        let Some(session) = &self.session else { return Err(Error::NoSession) };
-        let req = ehttp::Request::get(format!("{URL_DOWNLOAD}?rid={rid}"))
-            .with_headers(ehttp::Headers::new(&[("Cookie", &session.cookie)]));
-        Ok(req)
-    }
-
-    fn handle_download_res(&self, res: ehttp::Response) -> Result<Vec<u8>> {
-        match res.status {
-            200 => Ok(res.bytes),
-            400 => Err(Error::BadRequest),
-            401 => Err(Error::Unauthorized),
-            404 => Err(Error::NotFound),
-            code => Err(Error::UnexpectedStatusCode(code)),
         }
     }
 }

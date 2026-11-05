@@ -14,14 +14,6 @@ pub use library::*;
 
 pub use ::uuid::Uuid;
 
-/// Represents an active authenticated session.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct Session {
-    /// The session cookie string returned by the server.
-    pub cookie: String,
-}
-
 // NOTE: `description` is missing, since it's always null.
 /// A GDTF entry from the GDTF Share library.
 #[derive(Debug, Clone, PartialEq)]

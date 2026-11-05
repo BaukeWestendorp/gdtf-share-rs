@@ -4,11 +4,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let password = dotenv::var("GDTF_SHARE_PASSWORD")?;
 
     smol::block_on(async {
-        // Create a new GDTF Share client.
-        let mut client = gdtf_share::Client::new();
-
-        // Log in to the GDTF Share with a username and password. Make sure these are stored securely!
-        client.login_async(&user, &password).await?;
+        // Create a new GDTF Share client for a username and password. Make sure these are stored securely!
+        let mut client = gdtf_share::Client::new(&user, &password);
 
         // Get all entries in the GDTF Share.
         let mut entries = client.get_list_async().await?;

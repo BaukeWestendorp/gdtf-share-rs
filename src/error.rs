@@ -16,12 +16,10 @@ pub enum Error {
     UnexpectedStatusCode(u16),
     /// The `Set-Cookie` header was missing from the response.
     MissingCookie,
-    /// Transport or underlying client error.
-    ClientError(String),
-    /// Operation requires an active session, but client is unauthenticated.
-    NoSession,
     /// The rating value is invalid.
     InvalidRating,
+    /// Transport or underlying client error.
+    ClientError(String),
 }
 
 impl std::fmt::Display for Error {
@@ -33,9 +31,8 @@ impl std::fmt::Display for Error {
             Self::NotFound => write!(f, "Not Found (404)"),
             Self::UnexpectedStatusCode(c) => write!(f, "Unexpected status code: {c}"),
             Self::MissingCookie => write!(f, "Set-Cookie header was missing from the response"),
-            Self::ClientError(s) => write!(f, "Client Error: {s}"),
-            Self::NoSession => write!(f, "No session available. Please login first."),
             Self::InvalidRating => write!(f, "Invalid rating value"),
+            Self::ClientError(s) => write!(f, "Client Error: {s}"),
         }
     }
 }
