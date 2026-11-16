@@ -308,6 +308,13 @@ impl Client {
         self.session.as_ref().ok_or(Error::Unauthorized)
     }
 
+    /// Caches a GDTF archive for a given Revision ID (RID) to the filesystem.
+    #[cfg(feature = "cache")]
+    pub fn cache_gdtf_revision(&mut self, rid: RevisionId, gdtf_bytes: &[u8]) -> Result<()> {
+        self.write_download_cache(rid, gdtf_bytes);
+        Ok(())
+    }
+
     #[cfg(feature = "cache")]
     fn list_cache_path(&self) -> Option<std::path::PathBuf> {
         Some(self.cache_path.as_ref()?.join(LIST_CACHE_FILE))
