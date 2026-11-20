@@ -63,3 +63,8 @@ let client = gdtf_share::Client::new()
 ## Contributing
 
 Feel free to open an issue to discuss about missing features or found bugs, it's OSS after all!
+
+> **NOTE** > I will not accept any PRs that includes an AI agent as a contributer.
+> I strongly believe in keeping the domain-knowledge of the library in human hands.
+> That being said, a PR that _suggests_ a code change (without an actual agent contribution) is fine as long as I don't feel the obligation to include said code.
+> (i.e. I want the ability to review, potentially personally modify and accept a PR without an AI agent being part of this repository.)
