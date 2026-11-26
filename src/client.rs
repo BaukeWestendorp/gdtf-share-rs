@@ -23,7 +23,11 @@ pub struct Client {
     session: Option<Session>,
 
     #[cfg(feature = "cache")]
-    cache_path: Option<std::path::PathBuf>,
+    cache_enabled: bool,
+    #[cfg(feature = "cache")]
+    cache_override_path: Option<std::path::PathBuf>,
+    #[cfg(feature = "cache")]
+    default_cache_path: Option<std::path::PathBuf>,
     #[cfg(feature = "cache")]
     cache_ttl: Option<std::time::Duration>,
 
@@ -37,7 +41,11 @@ impl Client {
         Self {
             session: None,
             #[cfg(feature = "cache")]
-            cache_path: default_cache_path(),
+            cache_enabled: true,
+            #[cfg(feature = "cache")]
+            cache_override_path: None,
+            #[cfg(feature = "cache")]
+            default_cache_path: default_cache_path(),
             #[cfg(feature = "cache")]
             cache_ttl: Some(std::time::Duration::from_secs(24 * 60 * 60)),
 
@@ -46,7 +54,11 @@ impl Client {
         }
     }
 
-    /// Sets a custom cache directory path and TTL, overriding the system default cache location.
+    /// Sets a custom cache directory path override and TTL.
+    ///
+    /// When searching for cached entries or downloads, the override cache directory will be checked
+    /// first. If an item is not found in the override cache, the client falls back to the system
+    /// default cache directory.
     ///
     /// The fixture list cache and downloaded GDTF archives will be stored inside this directory.
     #[cfg(feature = "cache")]
@@ -55,12 +67,27 @@ impl Client {
         path: impl Into<std::path::PathBuf>,
         ttl: std::time::Duration,
     ) -> Self {
-        self.cache_path = Some(path.into());
+        self.cache_enabled = true;
+        self.cache_override_path = Some(path.into());
         self.cache_ttl = Some(ttl);
         self
     }
 
-    /// Customizes the TTL duration while keeping the system default cache path.
+    /// Sets a custom cache directory path override while keeping the default TTL.
+    ///
+    /// When searching for cached entries or downloads, the override cache directory will be checked
+    /// first. If an item is not found in the override cache, the client falls back to the system
+    /// default cache directory.
+    ///
+    /// The fixture list cache and downloaded GDTF archives will be stored inside this directory.
+    #[cfg(feature = "cache")]
+    pub fn with_cache_path(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.cache_enabled = true;
+        self.cache_override_path = Some(path.into());
+        self
+    }
+
+    /// Customizes the TTL duration while keeping the cache path settings.
     #[cfg(feature = "cache")]
     pub fn with_cache_ttl(mut self, ttl: std::time::Duration) -> Self {
         self.cache_ttl = Some(ttl);
@@ -70,7 +97,7 @@ impl Client {
     /// Disables filesystem caching for this client instance.
     #[cfg(feature = "cache")]
     pub fn without_cache(mut self) -> Self {
-        self.cache_path = None;
+        self.cache_enabled = false;
         self
     }
 
@@ -316,16 +343,23 @@ impl Client {
     }
 
     #[cfg(feature = "cache")]
-    fn list_cache_path(&self) -> Option<std::path::PathBuf> {
-        Some(self.cache_path.as_ref()?.join(LIST_CACHE_FILE))
+    fn target_cache_dir(&self) -> Option<&std::path::Path> {
+        if !self.cache_enabled {
+            return None;
+        }
+        self.cache_override_path.as_deref().or(self.default_cache_path.as_deref())
     }
 
     #[cfg(feature = "cache")]
-    fn read_cache(&self) -> Option<Vec<Entry>> {
-        let path = self.list_cache_path()?;
+    fn list_cache_path(&self) -> Option<std::path::PathBuf> {
+        Some(self.target_cache_dir()?.join(LIST_CACHE_FILE))
+    }
+
+    #[cfg(feature = "cache")]
+    fn try_read_list_cache_at(&self, path: &std::path::Path) -> Option<Vec<Entry>> {
         let ttl = self.cache_ttl?;
 
-        let metadata = std::fs::metadata(&path).ok()?;
+        let metadata = std::fs::metadata(path).ok()?;
         let modified = metadata.modified().ok()?;
 
         if modified.elapsed().unwrap_or_default() > ttl {
@@ -334,13 +368,38 @@ impl Client {
             return None;
         }
 
-        let bytes = std::fs::read(&path).ok()?;
+        let bytes = std::fs::read(path).ok()?;
         let entries = self.handle_get_list_bytes(&bytes).ok()?;
 
         #[cfg(feature = "log")]
         log::debug!("Cache hit: loaded {} entries from {:?}", entries.len(), path);
 
         Some(entries)
+    }
+
+    #[cfg(feature = "cache")]
+    fn read_cache(&self) -> Option<Vec<Entry>> {
+        if !self.cache_enabled {
+            return None;
+        }
+
+        if let Some(ref override_path) = self.cache_override_path {
+            let path = override_path.join(LIST_CACHE_FILE);
+            if let Some(entries) = self.try_read_list_cache_at(&path) {
+                return Some(entries);
+            }
+        }
+
+        if let Some(ref default_path) = self.default_cache_path {
+            if self.cache_override_path.as_ref() != Some(default_path) {
+                let path = default_path.join(LIST_CACHE_FILE);
+                if let Some(entries) = self.try_read_list_cache_at(&path) {
+                    return Some(entries);
+                }
+            }
+        }
+
+        None
     }
 
     #[cfg(feature = "cache")]
@@ -358,16 +417,18 @@ impl Client {
 
     #[cfg(feature = "cache")]
     fn download_cache_path(&self, rid: RevisionId) -> Option<std::path::PathBuf> {
-        let base_path = self.cache_path.as_ref()?;
-        Some(base_path.join(DOWNLOADS_CACHE_DIR).join(format!("{rid}.gdtf")))
+        Some(self.target_cache_dir()?.join(DOWNLOADS_CACHE_DIR).join(format!("{rid}.gdtf")))
     }
 
     #[cfg(feature = "cache")]
-    fn read_download_cache(&self, rid: RevisionId) -> Option<Vec<u8>> {
-        let path = self.download_cache_path(rid)?;
+    fn try_read_download_cache_at(
+        &self,
+        path: &std::path::Path,
+        rid: RevisionId,
+    ) -> Option<Vec<u8>> {
         let ttl = self.cache_ttl?;
 
-        let metadata = std::fs::metadata(&path).ok()?;
+        let metadata = std::fs::metadata(path).ok()?;
         let modified = metadata.modified().ok()?;
 
         if modified.elapsed().unwrap_or_default() > ttl {
@@ -376,11 +437,36 @@ impl Client {
             return None;
         }
 
-        let bytes = std::fs::read(&path).ok()?;
+        let bytes = std::fs::read(path).ok()?;
         #[cfg(feature = "log")]
         log::debug!("Cache hit: loaded {} bytes for RID {} from {:?}", bytes.len(), rid, path);
 
         Some(bytes)
+    }
+
+    #[cfg(feature = "cache")]
+    fn read_download_cache(&self, rid: RevisionId) -> Option<Vec<u8>> {
+        if !self.cache_enabled {
+            return None;
+        }
+
+        if let Some(ref override_path) = self.cache_override_path {
+            let path = override_path.join(DOWNLOADS_CACHE_DIR).join(format!("{rid}.gdtf"));
+            if let Some(bytes) = self.try_read_download_cache_at(&path, rid) {
+                return Some(bytes);
+            }
+        }
+
+        if let Some(ref default_path) = self.default_cache_path {
+            if self.cache_override_path.as_ref() != Some(default_path) {
+                let path = default_path.join(DOWNLOADS_CACHE_DIR).join(format!("{rid}.gdtf"));
+                if let Some(bytes) = self.try_read_download_cache_at(&path, rid) {
+                    return Some(bytes);
+                }
+            }
+        }
+
+        None
     }
 
     #[cfg(feature = "cache")]
