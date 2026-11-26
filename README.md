@@ -33,23 +33,29 @@ eprintln!(
 
 ## Caching
 
-When the `cache` feature is enabled, `Client` automatically caches API responses and downloaded files locally
+When the `cache` feature is enabled, `Client` automatically caches API responses and downloaded files locally.
 Calls to `get_list()` and `download()` will read directly from disk if a valid cached item exists.
-Cache behavior can be customized or disabled using builder methods on Client:
+Cache behavior can be customized or disabled using builder methods on `Client`:
 
 ```rust
 use std::time::Duration;
 
-// Customize TTL while keeping default system cache path
-let client = gdtf_share::Client::new()
+// Customize TTL while keeping the default system cache path
+let client = gdtf_share::Client::new("user", "pass")
     .with_cache_ttl(Duration::from_secs(12 * 3600));
 
-// Specify a custom cache path and TTL
-let client = gdtf_share::Client::new()
+// Set a custom cache directory override and TTL.
+// The override is checked first; if the item isn't found there,
+// the client falls back to the system default cache directory.
+let client = gdtf_share::Client::new("user", "pass")
     .with_cache("/path/to/cache/", Duration::from_secs(3600));
 
+// Set a custom cache directory override while keeping the default TTL.
+let client = gdtf_share::Client::new("user", "pass")
+    .with_cache_path("/path/to/cache/");
+
 // Disable caching
-let client = gdtf_share::Client::new()
+let client = gdtf_share::Client::new("user", "pass")
     .without_cache();
 ```
 
