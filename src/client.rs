@@ -70,12 +70,17 @@ impl Client {
         path: impl Into<std::path::PathBuf>,
         ttl: std::time::Duration,
     ) -> Self {
-        let path = path.into();
-        self.cache_enabled = true;
-        self.list_cache_override_path = Some(path.join(LIST_CACHE_FILE));
-        self.downloads_cache_override_path = Some(path.join(DOWNLOADS_CACHE_DIR));
-        self.cache_ttl = Some(ttl);
+        self.set_cache(path, ttl);
         self
+    }
+
+    /// Sets a custom cache directory path override and TTL on an existing client.
+    ///
+    /// See [`Client::with_cache`] for details.
+    #[cfg(feature = "cache")]
+    pub fn set_cache(&mut self, path: impl Into<std::path::PathBuf>, ttl: std::time::Duration) {
+        self.set_cache_path(path);
+        self.set_cache_ttl(ttl);
     }
 
     /// Sets a custom cache directory path override while keeping the default TTL.
@@ -86,11 +91,19 @@ impl Client {
     /// client falls back to the system default cache directory.
     #[cfg(feature = "cache")]
     pub fn with_cache_path(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.set_cache_path(path);
+        self
+    }
+
+    /// Sets a custom cache directory path override on an existing client.
+    ///
+    /// See [`Client::with_cache_path`] for details.
+    #[cfg(feature = "cache")]
+    pub fn set_cache_path(&mut self, path: impl Into<std::path::PathBuf>) {
         let path = path.into();
         self.cache_enabled = true;
         self.list_cache_override_path = Some(path.join(LIST_CACHE_FILE));
         self.downloads_cache_override_path = Some(path.join(DOWNLOADS_CACHE_DIR));
-        self
     }
 
     /// Sets a custom file path override for the `get_list` cache file.
@@ -99,9 +112,17 @@ impl Client {
     /// expired, the client falls back to the system default cache file.
     #[cfg(feature = "cache")]
     pub fn with_list_cache_path(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.set_list_cache_path(path);
+        self
+    }
+
+    /// Sets a custom file path override for the `get_list` cache file on an existing client.
+    ///
+    /// See [`Client::with_list_cache_path`] for details.
+    #[cfg(feature = "cache")]
+    pub fn set_list_cache_path(&mut self, path: impl Into<std::path::PathBuf>) {
         self.cache_enabled = true;
         self.list_cache_override_path = Some(path.into());
-        self
     }
 
     /// Sets a custom folder path override for cached downloaded GDTF archives.
@@ -110,23 +131,43 @@ impl Client {
     /// expired, the client falls back to the system default downloads cache folder.
     #[cfg(feature = "cache")]
     pub fn with_downloads_cache_path(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.set_downloads_cache_path(path);
+        self
+    }
+
+    /// Sets a custom folder path override for cached downloaded GDTF archives on an existing client.
+    ///
+    /// See [`Client::with_downloads_cache_path`] for details.
+    #[cfg(feature = "cache")]
+    pub fn set_downloads_cache_path(&mut self, path: impl Into<std::path::PathBuf>) {
         self.cache_enabled = true;
         self.downloads_cache_override_path = Some(path.into());
-        self
     }
 
     /// Customizes the TTL duration while keeping the cache path settings.
     #[cfg(feature = "cache")]
     pub fn with_cache_ttl(mut self, ttl: std::time::Duration) -> Self {
-        self.cache_ttl = Some(ttl);
+        self.set_cache_ttl(ttl);
         self
+    }
+
+    /// Customizes the TTL duration on an existing client while keeping the cache path settings.
+    #[cfg(feature = "cache")]
+    pub fn set_cache_ttl(&mut self, ttl: std::time::Duration) {
+        self.cache_ttl = Some(ttl);
     }
 
     /// Disables filesystem caching for this client instance.
     #[cfg(feature = "cache")]
     pub fn without_cache(mut self) -> Self {
-        self.cache_enabled = false;
+        self.set_cache_enabled(false);
         self
+    }
+
+    /// Enables or disables filesystem caching on an existing client instance.
+    #[cfg(feature = "cache")]
+    pub fn set_cache_enabled(&mut self, enabled: bool) {
+        self.cache_enabled = enabled;
     }
 
     /// Authenticates with the GDTF Share API synchronously.
