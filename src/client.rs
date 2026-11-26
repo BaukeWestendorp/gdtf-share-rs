@@ -25,7 +25,9 @@ pub struct Client {
     #[cfg(feature = "cache")]
     cache_enabled: bool,
     #[cfg(feature = "cache")]
-    cache_override_path: Option<std::path::PathBuf>,
+    list_cache_override_path: Option<std::path::PathBuf>,
+    #[cfg(feature = "cache")]
+    downloads_cache_override_path: Option<std::path::PathBuf>,
     #[cfg(feature = "cache")]
     default_cache_path: Option<std::path::PathBuf>,
     #[cfg(feature = "cache")]
@@ -43,7 +45,9 @@ impl Client {
             #[cfg(feature = "cache")]
             cache_enabled: true,
             #[cfg(feature = "cache")]
-            cache_override_path: None,
+            list_cache_override_path: None,
+            #[cfg(feature = "cache")]
+            downloads_cache_override_path: None,
             #[cfg(feature = "cache")]
             default_cache_path: default_cache_path(),
             #[cfg(feature = "cache")]
@@ -56,34 +60,58 @@ impl Client {
 
     /// Sets a custom cache directory path override and TTL.
     ///
-    /// When searching for cached entries or downloads, the override cache directory will be checked
-    /// first. If an item is not found in the override cache, the client falls back to the system
-    /// default cache directory.
-    ///
-    /// The fixture list cache and downloaded GDTF archives will be stored inside this directory.
+    /// This sets both the fixture list cache file override (`<path>/get_list.json`) and the
+    /// downloads cache folder override (`<path>/downloads`). When searching for cached entries or
+    /// downloads, the override paths will be checked first. If an item is not found there, the
+    /// client falls back to the system default cache directory.
     #[cfg(feature = "cache")]
     pub fn with_cache(
         mut self,
         path: impl Into<std::path::PathBuf>,
         ttl: std::time::Duration,
     ) -> Self {
+        let path = path.into();
         self.cache_enabled = true;
-        self.cache_override_path = Some(path.into());
+        self.list_cache_override_path = Some(path.join(LIST_CACHE_FILE));
+        self.downloads_cache_override_path = Some(path.join(DOWNLOADS_CACHE_DIR));
         self.cache_ttl = Some(ttl);
         self
     }
 
     /// Sets a custom cache directory path override while keeping the default TTL.
     ///
-    /// When searching for cached entries or downloads, the override cache directory will be checked
-    /// first. If an item is not found in the override cache, the client falls back to the system
-    /// default cache directory.
-    ///
-    /// The fixture list cache and downloaded GDTF archives will be stored inside this directory.
+    /// This sets both the fixture list cache file override (`<path>/get_list.json`) and the
+    /// downloads cache folder override (`<path>/downloads`). When searching for cached entries or
+    /// downloads, the override paths will be checked first. If an item is not found there, the
+    /// client falls back to the system default cache directory.
     #[cfg(feature = "cache")]
     pub fn with_cache_path(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        let path = path.into();
         self.cache_enabled = true;
-        self.cache_override_path = Some(path.into());
+        self.list_cache_override_path = Some(path.join(LIST_CACHE_FILE));
+        self.downloads_cache_override_path = Some(path.join(DOWNLOADS_CACHE_DIR));
+        self
+    }
+
+    /// Sets a custom file path override for the `get_list` cache file.
+    ///
+    /// When searching for the cached fixture list, this file will be checked first. If not found or
+    /// expired, the client falls back to the system default cache file.
+    #[cfg(feature = "cache")]
+    pub fn with_list_cache_path(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.cache_enabled = true;
+        self.list_cache_override_path = Some(path.into());
+        self
+    }
+
+    /// Sets a custom folder path override for cached downloaded GDTF archives.
+    ///
+    /// When searching for a cached download, this folder will be checked first. If not found or
+    /// expired, the client falls back to the system default downloads cache folder.
+    #[cfg(feature = "cache")]
+    pub fn with_downloads_cache_path(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.cache_enabled = true;
+        self.downloads_cache_override_path = Some(path.into());
         self
     }
 
@@ -343,16 +371,21 @@ impl Client {
     }
 
     #[cfg(feature = "cache")]
-    fn target_cache_dir(&self) -> Option<&std::path::Path> {
-        if !self.cache_enabled {
-            return None;
-        }
-        self.cache_override_path.as_deref().or(self.default_cache_path.as_deref())
+    fn default_list_cache_path(&self) -> Option<std::path::PathBuf> {
+        Some(self.default_cache_path.as_ref()?.join(LIST_CACHE_FILE))
+    }
+
+    #[cfg(feature = "cache")]
+    fn default_downloads_cache_dir(&self) -> Option<std::path::PathBuf> {
+        Some(self.default_cache_path.as_ref()?.join(DOWNLOADS_CACHE_DIR))
     }
 
     #[cfg(feature = "cache")]
     fn list_cache_path(&self) -> Option<std::path::PathBuf> {
-        Some(self.target_cache_dir()?.join(LIST_CACHE_FILE))
+        if !self.cache_enabled {
+            return None;
+        }
+        self.list_cache_override_path.clone().or_else(|| self.default_list_cache_path())
     }
 
     #[cfg(feature = "cache")]
@@ -383,17 +416,15 @@ impl Client {
             return None;
         }
 
-        if let Some(ref override_path) = self.cache_override_path {
-            let path = override_path.join(LIST_CACHE_FILE);
-            if let Some(entries) = self.try_read_list_cache_at(&path) {
+        if let Some(ref override_path) = self.list_cache_override_path {
+            if let Some(entries) = self.try_read_list_cache_at(override_path) {
                 return Some(entries);
             }
         }
 
-        if let Some(ref default_path) = self.default_cache_path {
-            if self.cache_override_path.as_ref() != Some(default_path) {
-                let path = default_path.join(LIST_CACHE_FILE);
-                if let Some(entries) = self.try_read_list_cache_at(&path) {
+        if let Some(default_path) = self.default_list_cache_path() {
+            if self.list_cache_override_path.as_ref() != Some(&default_path) {
+                if let Some(entries) = self.try_read_list_cache_at(&default_path) {
                     return Some(entries);
                 }
             }
@@ -417,7 +448,14 @@ impl Client {
 
     #[cfg(feature = "cache")]
     fn download_cache_path(&self, rid: RevisionId) -> Option<std::path::PathBuf> {
-        Some(self.target_cache_dir()?.join(DOWNLOADS_CACHE_DIR).join(format!("{rid}.gdtf")))
+        if !self.cache_enabled {
+            return None;
+        }
+        let dir = self
+            .downloads_cache_override_path
+            .clone()
+            .or_else(|| self.default_downloads_cache_dir())?;
+        Some(dir.join(format!("{rid}.gdtf")))
     }
 
     #[cfg(feature = "cache")]
@@ -450,16 +488,16 @@ impl Client {
             return None;
         }
 
-        if let Some(ref override_path) = self.cache_override_path {
-            let path = override_path.join(DOWNLOADS_CACHE_DIR).join(format!("{rid}.gdtf"));
+        if let Some(ref override_dir) = self.downloads_cache_override_path {
+            let path = override_dir.join(format!("{rid}.gdtf"));
             if let Some(bytes) = self.try_read_download_cache_at(&path, rid) {
                 return Some(bytes);
             }
         }
 
-        if let Some(ref default_path) = self.default_cache_path {
-            if self.cache_override_path.as_ref() != Some(default_path) {
-                let path = default_path.join(DOWNLOADS_CACHE_DIR).join(format!("{rid}.gdtf"));
+        if let Some(default_dir) = self.default_downloads_cache_dir() {
+            if self.downloads_cache_override_path.as_ref() != Some(&default_dir) {
+                let path = default_dir.join(format!("{rid}.gdtf"));
                 if let Some(bytes) = self.try_read_download_cache_at(&path, rid) {
                     return Some(bytes);
                 }

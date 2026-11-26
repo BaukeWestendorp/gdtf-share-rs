@@ -44,8 +44,8 @@ use std::time::Duration;
 let client = gdtf_share::Client::new("user", "pass")
     .with_cache_ttl(Duration::from_secs(12 * 3600));
 
-// Set a custom cache directory override and TTL.
-// The override is checked first; if the item isn't found there,
+// Set a custom cache directory override (for both get_list.json and downloads/) and TTL.
+// Overrides are checked first; if an item isn't found there,
 // the client falls back to the system default cache directory.
 let client = gdtf_share::Client::new("user", "pass")
     .with_cache("/path/to/cache/", Duration::from_secs(3600));
@@ -53,6 +53,11 @@ let client = gdtf_share::Client::new("user", "pass")
 // Set a custom cache directory override while keeping the default TTL.
 let client = gdtf_share::Client::new("user", "pass")
     .with_cache_path("/path/to/cache/");
+
+// Or override the `get_list` cache file and `downloads` folder separately:
+let client = gdtf_share::Client::new("user", "pass")
+    .with_list_cache_path("/path/to/get_list.json")
+    .with_downloads_cache_path("/path/to/downloads/");
 
 // Disable caching
 let client = gdtf_share::Client::new("user", "pass")
