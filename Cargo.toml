@@ -1,12 +1,19 @@
 [package]
 name = "gdtf-share"
-version = "0.5.2"
+version = "0.5.3"
 edition = "2024"
 description = "Library for interacting with the GDTF Share API."
 repository = "https://github.com/BaukeWestendorp/gdtf-share-rs"
 license = "MIT"
 keywords = ["dmx", "gdtf", "mvr"]
 categories = ["api-bindings", "asynchronous"]
+
+[features]
+default = []
+async = ["client", "ehttp/native-async"]
+cache = ["dep:dirs"]
+client = ["dep:ehttp", "dep:secrecy"]
+log = ["dep:log"]
 
 [[example]]
 name = "blocking"
@@ -43,10 +50,3 @@ log = { version = "0.4.35", optional = true }
 criterion = "0.8.2"
 dotenv = "0.15.0"
 smol = "2.0.2"
-
-[features]
-default = []
-async = ["client", "ehttp/native-async"]
-cache = ["dep:dirs"]
-client = ["dep:ehttp", "dep:secrecy"]
-log = ["dep:log"]
